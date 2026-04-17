@@ -1,91 +1,73 @@
 import { useState, useEffect } from 'react';
-import { db } from './firebase'; 
-import { collection, getDocs } from 'firebase/firestore';
-import ProductCard from './components/ProductCard';
+import { BrowserRouter, Routes, Route, Link, Navigate } from 'react-router-dom';
+import { auth } from './firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+
+// นำเข้าหน้าต่างๆ ที่เราสร้างไว้
+import Login from './Login';
+import POS from './POS';
+import Dashboard from './Dashboard';
+import ProductManagement from './ProductManagement';
 
 function App() {
-  const [products, setProducts] = useState([]);
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  
-  // --- ส่วนที่เพิ่มใหม่: State สำหรับการค้นหาและกรอง ---
-  const [searchTerm, setSearchTerm] = useState(""); // เก็บคำค้นหา
-  const [selectedCategory, setSelectedCategory] = useState("All"); // เก็บหมวดหมู่ที่เลือก
 
-  const fetchProducts = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, "products"));
-      const data = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setProducts(data);
-      setLoading(false);
-    } catch (error) {
-      console.error("Error fetching data:", error);
-    }
-  };
-
+  // เช็คสถานะ Login
   useEffect(() => {
-    fetchProducts();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
 
-  // --- ส่วนที่เพิ่มใหม่: Logic การกรองข้อมูล ---
-  const filteredProducts = products.filter(item => {
-    const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = selectedCategory === "All" || item.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  const handleLogout = () => {
+    signOut(auth);
+  };
 
-  if (loading) return <div className="p-10 text-center text-amber-900 font-bold text-xl">กำลังชงกาแฟรอสักครู่... ☕</div>;
+  if (loading) return <div className="p-10 text-center font-sans">กำลังสตาร์ทระบบ... ☕</div>;
+
+  if (!user) {
+    return <Login />;
+  }
 
   return (
-    <div className="min-h-screen bg-stone-100 p-8">
-      <header className="mb-8 max-w-4xl mx-auto text-center">
-        <h1 className="text-4xl font-bold text-amber-900 mb-6">Cafe POS Menu</h1>
+    <BrowserRouter>
+      {/* 🌟 ปรับปรุง: เพิ่ม print:h-auto และ print:overflow-visible เพื่อให้กระดาษพิมพ์ยาวได้ตามต้องการ */}
+      <div className="h-screen bg-stone-100 flex flex-col font-sans overflow-hidden print:h-auto print:overflow-visible print:bg-white">
         
-        {/* ส่วนของช่องค้นหาและปุ่มหมวดหมู่ */}
-        <div className="space-y-4 bg-white p-6 rounded-2xl shadow-sm border border-stone-200">
-          <input 
-            type="text" 
-            placeholder="🔍 ค้นหาเมนูที่ต้องการ..." 
-            className="w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-          
-          <div className="flex gap-2 justify-center flex-wrap">
-            {["All", "Coffee", "Tea", "Smoothie", "Snack"].map(cat => (
-              <button 
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-6 py-2 rounded-full font-semibold transition-all ${
-                  selectedCategory === cat 
-                  ? "bg-amber-700 text-white shadow-md" 
-                  : "bg-stone-200 text-stone-600 hover:bg-stone-300"
-                }`}
-              >
-                {cat === "All" ? "ทั้งหมด" : cat}
-              </button>
-            ))}
+        {/* Navbar โดนซ่อนตอนพิมพ์ (ถูกต้องแล้ว) */}
+        <nav className="print:hidden bg-amber-950 text-white p-4 shadow-md flex justify-between items-center z-10">
+          <div className="flex gap-8 items-center pl-4">
+            <span className="font-black text-xl tracking-wider text-amber-400">☕ CAFE POS</span>
+            <Link to="/" className="font-semibold hover:text-amber-300 transition-colors">หน้าร้าน (POS)</Link>
+            <Link to="/dashboard" className="font-semibold hover:text-amber-300 transition-colors">หลังบ้าน (Dashboard)</Link>
+            <Link to="/products" className="font-semibold hover:text-amber-300 transition-colors">จัดการสินค้า</Link>
           </div>
-        </div>
-      </header>
+          <div className="flex items-center gap-4 pr-4">
+            <span className="text-sm text-amber-200">พนักงาน: {user.email}</span>
+            <button 
+              onClick={handleLogout}
+              className="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-lg font-bold text-sm transition-colors shadow-sm"
+            >
+              ออกจากระบบ
+            </button>
+          </div>
+        </nav>
 
-      {/* แสดงผลการ์ดตามข้อมูลที่กรองแล้ว */}
-      <div className="flex flex-wrap gap-6 justify-center max-w-6xl mx-auto">
-        {filteredProducts.length > 0 ? (
-          filteredProducts.map((item) => (
-            <ProductCard 
-              key={item.id} 
-              name={item.name} 
-              price={item.price} 
-              image={item.image} 
-            />
-          ))
-        ) : (
-          <div className="text-stone-400 mt-10 italic">ไม่พบเมนูที่คุณกำลังค้นหา...</div>
-        )}
+        {/* 🛑 เอา print:hidden ออกจากบรรทัดนี้แล้วครับ! ใบเสร็จเราจะได้โผล่มา */}
+        <main className="flex-1 overflow-hidden relative print:overflow-visible print:h-auto">
+          <Routes>
+            <Route path="/" element={<POS />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/products" element={<ProductManagement />} />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </main>
+
       </div>
-    </div>
+    </BrowserRouter>
   );
 }
 

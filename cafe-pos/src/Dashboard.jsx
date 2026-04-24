@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { db } from './firebase'; 
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+// 🌟 เพิ่ม addDoc, deleteDoc, doc เข้ามาเพื่อใช้จัดการส่วนลด
+import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 
 function Dashboard() {
@@ -9,21 +10,58 @@ function Dashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5; 
 
-  // ✅ ใช้วันที่ปัจจุบันโซนเวลาไทยเป็นค่าเริ่มต้น (แก้ไขบัคเที่ยงคืน)
+  // 🎟️ State สำหรับเก็บโค้ดส่วนลด และ ฟอร์มเพิ่มโค้ด
+  const [promos, setPromos] = useState([]);
+  const [newPromoCode, setNewPromoCode] = useState("");
+  const [newPromoPercent, setNewPromoPercent] = useState("");
+
   const todayString = new Date().toLocaleDateString('sv-SE'); 
   const [selectedDate, setSelectedDate] = useState(todayString);
 
   useEffect(() => {
+    // ดึงข้อมูลยอดขาย
     const q = query(collection(db, "orders"), orderBy("timestamp", "desc"));
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setOrders(data);
       setLoading(false);
     });
-    return () => unsubscribe();
+
+    // 🎟️ ดึงข้อมูลโปรโมชันจาก Firebase
+    const qPromo = query(collection(db, "promotions"), orderBy("createdAt", "desc"));
+    const unsubPromo = onSnapshot(qPromo, (snapshot) => {
+      setPromos(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    return () => {
+      unsubscribe();
+      unsubPromo();
+    };
   }, []);
 
-  // ตัวกรองอัจฉริยะ: คัดมาเฉพาะบิลที่ตรงกับวันที่เลือก
+  // 🎟️ ฟังก์ชันเพิ่มโค้ดส่วนลด
+  const addPromotion = async () => {
+    if (!newPromoCode || !newPromoPercent) return alert("กรุณากรอกข้อมูลให้ครบถ้วน");
+    try {
+      await addDoc(collection(db, "promotions"), {
+        code: newPromoCode.toUpperCase().trim(),
+        percent: Number(newPromoPercent),
+        createdAt: new Date()
+      });
+      setNewPromoCode("");
+      setNewPromoPercent("");
+    } catch (error) {
+      console.error("Error adding promo:", error);
+    }
+  };
+
+  // 🎟️ ฟังก์ชันลบโค้ดส่วนลด
+  const deletePromotion = async (id) => {
+    if (window.confirm("คุณแน่ใจหรือไม่ว่าต้องการลบโค้ดส่วนลดนี้?")) {
+      await deleteDoc(doc(db, "promotions", id));
+    }
+  };
+
   const displayedOrders = selectedDate 
     ? orders.filter(order => order.date === selectedDate)
     : orders;
@@ -90,7 +128,7 @@ function Dashboard() {
 
   return (
     <div className="p-8 h-full overflow-y-auto bg-stone-100">
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="max-w-7xl mx-auto space-y-6 pb-20">
         
         <header className="flex justify-between items-end">
           <div>
@@ -170,7 +208,7 @@ function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden flex flex-col min-h-[400px]">
+        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden flex flex-col min-h-[400px] mb-8">
           <table className="w-full text-left border-collapse flex-1">
             <thead>
               <tr className="bg-stone-800 text-white">
@@ -213,6 +251,36 @@ function Dashboard() {
           </div>
         </div>
         
+        {/* 🎟️ ส่วนจัดการโปรโมชัน (Back-office) เพิ่มเข้ามาใหม่ตรงนี้ครับ */}
+        <div className="bg-white p-8 rounded-2xl shadow-sm border border-stone-200">
+          <h3 className="text-2xl font-bold text-amber-900 mb-6 flex items-center gap-2">🎟️ จัดการโค้ดส่วนลด</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 bg-amber-50 p-6 rounded-xl border border-amber-100">
+            <div>
+              <label className="block text-sm font-bold text-amber-800 mb-2">ชื่อโค้ด (เช่น COFFEE10)</label>
+              <input type="text" value={newPromoCode} onChange={(e) => setNewPromoCode(e.target.value)} className="w-full p-3 rounded-lg border-2 border-amber-200 focus:border-amber-600 outline-none uppercase font-bold" placeholder="พิมพ์โค้ดที่นี่..." />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-amber-800 mb-2">ส่วนลด (%)</label>
+              <input type="number" value={newPromoPercent} onChange={(e) => setNewPromoPercent(e.target.value)} className="w-full p-3 rounded-lg border-2 border-amber-200 focus:border-amber-600 outline-none font-bold" placeholder="เช่น 10" />
+            </div>
+            <div className="flex items-end">
+              <button onClick={addPromotion} className="w-full bg-amber-800 hover:bg-amber-900 text-white font-bold py-3.5 rounded-lg transition-all shadow-md">+ เพิ่มโค้ดส่วนลด</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {promos.length === 0 ? <p className="text-stone-400 col-span-full text-center py-4">ยังไม่มีโค้ดส่วนลดในระบบ</p> : promos.map(p => (
+              <div key={p.id} className="bg-white border-2 border-stone-100 rounded-xl p-4 flex justify-between items-center hover:border-amber-300 transition-colors shadow-sm">
+                <div>
+                  <p className="font-black text-amber-900 text-xl">{p.code}</p>
+                  <p className="text-sm text-green-600 font-bold">ลด {p.percent}%</p>
+                </div>
+                <button onClick={() => deletePromotion(p.id)} className="text-red-300 hover:text-red-600 transition-colors text-xl">🗑️</button>
+              </div>
+            ))}
+          </div>
+        </div>
+
       </div>
     </div>
   );

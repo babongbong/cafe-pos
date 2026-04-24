@@ -14,6 +14,7 @@ function POS() {
   const [cart, setCart] = useState([]);
 
   // 🎟️ State สำหรับระบบ Promo Code
+  const [promotions, setPromotions] = useState([]); // 🌟 เพิ่ม State รับข้อมูลจาก DB
   const [discount, setDiscount] = useState(0); 
   const [promoCode, setPromoCode] = useState("");
   const [promoMessage, setPromoMessage] = useState("");
@@ -26,22 +27,31 @@ function POS() {
   const PROMPTPAY_ID = "0812345678"; 
 
   useEffect(() => {
+    // ดึงข้อมูลสินค้า
     const q = query(collection(db, "products"));
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setProducts(data);
       setLoading(false);
     });
-    return () => unsubscribe();
+
+    // 🌟 ดึงข้อมูลโปรโมชันจาก Firebase
+    const unsubPromo = onSnapshot(collection(db, "promotions"), (snapshot) => {
+      setPromotions(snapshot.docs.map(doc => doc.data()));
+    });
+
+    return () => {
+      unsubscribe();
+      unsubPromo();
+    };
   }, []);
 
-  // 🛡️ เช็คสต็อกก่อนกดใส่ตะกร้า
+  // 🛡️ เช็คสต็อกก่อนกดใส่ตะกร้า (เหมือนเดิมของน้อง 100%)
   const addToCart = (product) => {
     const existingItem = cart.find(item => item.id === product.id);
     const currentQtyInCart = existingItem ? existingItem.qty : 0;
 
     if (currentQtyInCart >= product.quantity) {
-      // ถ้าของในตะกร้า >= สต็อกจริง ให้หยุดทำงานทันที (กันกดเบิ้ลรัวๆ)
       return; 
     }
 
@@ -51,19 +61,25 @@ function POS() {
 
   const removeFromCart = (productId) => setCart(cart.filter(item => item.id !== productId));
   
-  // 🎟️ ฟังก์ชันเช็คโค้ดส่วนลด (แก้ชื่อโค้ดและ % ส่วนลดตรงนี้ได้เลย)
+  // 🎟️ ฟังก์ชันเช็คโค้ดส่วนลด (🌟 เปลี่ยนมาค้นหาใน DB แทนโค้ดตายตัว)
   const applyPromoCode = () => {
-    const code = promoCode.toUpperCase().trim(); // แปลงเป็นพิมพ์ใหญ่ตัดช่องว่าง
+    const code = promoCode.toUpperCase().trim(); 
     if (!code) {
       setDiscount(0);
       setPromoMessage("");
       return;
     }
 
-    if (code === "COFFEE10") { setDiscount(10); setPromoMessage("✅ ใช้โค้ดสำเร็จ: ลด 10%"); }
-    else if (code === "VIP20") { setDiscount(20); setPromoMessage("✅ ใช้โค้ดสำเร็จ: ลด 20%"); }
-    else if (code === "STAFF50") { setDiscount(50); setPromoMessage("✅ ใช้โค้ดสำเร็จ: ลด 50%"); }
-    else { setDiscount(0); setPromoMessage("❌ โค้ดไม่ถูกต้องหรือหมดอายุ"); }
+    // หาโค้ดในข้อมูลที่ดึงมาจาก Firebase
+    const foundPromo = promotions.find(p => p.code === code);
+
+    if (foundPromo) { 
+      setDiscount(foundPromo.percent); 
+      setPromoMessage(`✅ ใช้โค้ดสำเร็จ: ลด ${foundPromo.percent}%`); 
+    } else { 
+      setDiscount(0); 
+      setPromoMessage("❌ โค้ดไม่ถูกต้องหรือหมดอายุ"); 
+    }
   };
 
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
@@ -109,7 +125,7 @@ function POS() {
       setIsCheckoutOpen(false);  
       setCart([]);               
       setDiscount(0);
-      setPromoCode(""); // ล้างช่องโค้ด
+      setPromoCode(""); 
       setPromoMessage(""); 
       setReceiveAmount('');
       setPaymentMethod('cash');
@@ -147,7 +163,7 @@ function POS() {
 
           <div className="flex flex-wrap gap-4">
             {filteredProducts.map((item) => {
-              // 🧮 คำนวณสต็อกคงเหลือ (ลบกับของที่กดลงตะกร้าไปแล้วด้วย)
+              // 🧮 การคำนวณและ UI สต็อกหมด (เหมือนเดิมของน้อง 100%)
               const cartItem = cart.find(c => c.id === item.id);
               const cartQty = cartItem ? cartItem.qty : 0;
               const remainingStock = item.quantity - cartQty;
@@ -195,7 +211,7 @@ function POS() {
 
           <div className="p-6 border-t border-stone-200 bg-stone-50 space-y-4">
             
-            {/* 🎟️ ส่วนใส่โค้ดโปรโมชั่นแบบใหม่ */}
+            {/* 🎟️ ส่วนใส่โค้ดโปรโมชั่น */}
             <div>
               <p className="text-sm font-bold text-stone-500 mb-2">โค้ดส่วนลด (Promo Code)</p>
               <div className="flex gap-2">
@@ -331,7 +347,7 @@ function POS() {
         )}
       </div>
 
-      {/* 🌟 กระดาษพิมพ์ (จะโชว์เฉพาะตอนกด Ctrl+P) */}
+      {/* 🌟 กระดาษพิมพ์ */}
       {receiptData && (
         <div className="hidden print:block text-black p-4 bg-white font-sans w-[80mm] mx-auto">
           <div className="text-center mb-4"><h2 className="text-xl font-black">☕ CAFE POS</h2><p className="text-xs mt-1">ใบเสร็จรับเงิน</p></div>

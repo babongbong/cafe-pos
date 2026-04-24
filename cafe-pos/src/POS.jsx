@@ -3,7 +3,6 @@ import { db } from './firebase';
 import { collection, onSnapshot, query, addDoc, doc, updateDoc, increment } from 'firebase/firestore'; 
 import ProductCard from './components/ProductCard';
 
-// 🌟 นำเข้าไลบรารีสร้าง QR Code PromptPay (แก้ปัญหาหน้าจอขาวแล้ว)
 import generatePayload from 'promptpay-qr';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -14,14 +13,17 @@ function POS() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [cart, setCart] = useState([]);
 
+  // 🎟️ State สำหรับระบบ Promo Code
   const [discount, setDiscount] = useState(0); 
+  const [promoCode, setPromoCode] = useState("");
+  const [promoMessage, setPromoMessage] = useState("");
+
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false); 
   const [paymentMethod, setPaymentMethod] = useState('cash'); 
   const [receiveAmount, setReceiveAmount] = useState(''); 
   const [receiptData, setReceiptData] = useState(null);
 
-  // 🏦 ตั้งค่าเบอร์โทรศัพท์หรือบัตรประชาชนสำหรับรับเงิน (เปลี่ยนเป็นของน้องได้เลย)
-  const PROMPTPAY_ID = ""; //ใส่เบอร์โทร prompay ของตัวเอง
+  const PROMPTPAY_ID = "0812345678"; 
 
   useEffect(() => {
     const q = query(collection(db, "products"));
@@ -33,26 +35,47 @@ function POS() {
     return () => unsubscribe();
   }, []);
 
+  // 🛡️ เช็คสต็อกก่อนกดใส่ตะกร้า
   const addToCart = (product) => {
     const existingItem = cart.find(item => item.id === product.id);
+    const currentQtyInCart = existingItem ? existingItem.qty : 0;
+
+    if (currentQtyInCart >= product.quantity) {
+      // ถ้าของในตะกร้า >= สต็อกจริง ให้หยุดทำงานทันที (กันกดเบิ้ลรัวๆ)
+      return; 
+    }
+
     if (existingItem) setCart(cart.map(item => item.id === product.id ? { ...item, qty: item.qty + 1 } : item));
     else setCart([...cart, { ...product, qty: 1 }]);
   };
 
   const removeFromCart = (productId) => setCart(cart.filter(item => item.id !== productId));
   
+  // 🎟️ ฟังก์ชันเช็คโค้ดส่วนลด (แก้ชื่อโค้ดและ % ส่วนลดตรงนี้ได้เลย)
+  const applyPromoCode = () => {
+    const code = promoCode.toUpperCase().trim(); // แปลงเป็นพิมพ์ใหญ่ตัดช่องว่าง
+    if (!code) {
+      setDiscount(0);
+      setPromoMessage("");
+      return;
+    }
+
+    if (code === "COFFEE10") { setDiscount(10); setPromoMessage("✅ ใช้โค้ดสำเร็จ: ลด 10%"); }
+    else if (code === "VIP20") { setDiscount(20); setPromoMessage("✅ ใช้โค้ดสำเร็จ: ลด 20%"); }
+    else if (code === "STAFF50") { setDiscount(50); setPromoMessage("✅ ใช้โค้ดสำเร็จ: ลด 50%"); }
+    else { setDiscount(0); setPromoMessage("❌ โค้ดไม่ถูกต้องหรือหมดอายุ"); }
+  };
+
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
   const discountAmount = subtotal * (discount / 100);
   const netTotal = subtotal - discountAmount;
   const changeAmount = Number(receiveAmount) - netTotal;
 
-  // 📱 สร้างข้อมูล QR Code
   const qrPayload = generatePayload(PROMPTPAY_ID, { amount: netTotal });
 
   const confirmCheckout = async () => {
     try {
       const now = new Date();
-      // ✅ ใช้วันที่ท้องถิ่น (ประเทศไทย) แก้ปัญหาตัดยอดตอนเที่ยงคืน
       const localDate = now.toLocaleDateString('sv-SE'); 
       const dateStringForId = localDate.replace(/-/g, ''); 
       
@@ -61,7 +84,7 @@ function POS() {
 
       const orderData = {
         billId: newBillId,
-        date: localDate, // บันทึกวันที่ตามโซนเวลาไทย
+        date: localDate, 
         items: cart.map(item => `${item.name} (x${item.qty})`), 
         cartDetails: [...cart], 
         subtotal: subtotal,
@@ -72,7 +95,7 @@ function POS() {
         receiveAmount: paymentMethod === 'cash' ? Number(receiveAmount) : netTotal,
         changeAmount: paymentMethod === 'cash' ? changeAmount : 0,
         status: "Completed",
-        timestamp: now // เก็บเวลาเต็มรูปแบบ
+        timestamp: now 
       };
 
       await addDoc(collection(db, "orders"), orderData);
@@ -86,6 +109,8 @@ function POS() {
       setIsCheckoutOpen(false);  
       setCart([]);               
       setDiscount(0);
+      setPromoCode(""); // ล้างช่องโค้ด
+      setPromoMessage(""); 
       setReceiveAmount('');
       setPaymentMethod('cash');
 
@@ -121,12 +146,37 @@ function POS() {
           </div>
 
           <div className="flex flex-wrap gap-4">
-            {filteredProducts.map((item) => (
-              <div key={item.id} className="relative group cursor-pointer" onClick={() => addToCart(item)}>
-                <ProductCard name={item.name} price={item.price} image={item.image} />
-                <div className={`absolute top-2 right-2 text-xs font-bold px-2 py-1 rounded-md text-white shadow-sm ${item.quantity < 10 ? 'bg-red-500' : 'bg-stone-800'}`}>เหลือ {item.quantity}</div>
-              </div>
-            ))}
+            {filteredProducts.map((item) => {
+              // 🧮 คำนวณสต็อกคงเหลือ (ลบกับของที่กดลงตะกร้าไปแล้วด้วย)
+              const cartItem = cart.find(c => c.id === item.id);
+              const cartQty = cartItem ? cartItem.qty : 0;
+              const remainingStock = item.quantity - cartQty;
+              const isOutOfStock = remainingStock <= 0;
+
+              return (
+                <div 
+                  key={item.id} 
+                  className={`relative group ${isOutOfStock ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:scale-105 transition-transform'}`} 
+                  onClick={() => !isOutOfStock && addToCart(item)}
+                >
+                  <ProductCard name={item.name} price={item.price} image={item.image} />
+                  
+                  {/* ป้ายแสดงจำนวน */}
+                  <div className={`absolute top-2 right-2 text-xs font-bold px-2 py-1 rounded-md text-white shadow-sm ${isOutOfStock ? 'bg-red-600' : remainingStock < 10 ? 'bg-orange-500' : 'bg-stone-800'}`}>
+                    {isOutOfStock ? 'สินค้าหมด' : `เหลือ ${remainingStock}`}
+                  </div>
+
+                  {/* 🚫 UI สินค้าหมดคาดทับ */}
+                  {isOutOfStock && (
+                    <div className="absolute inset-0 bg-white/40 flex items-center justify-center rounded-2xl z-10">
+                      <span className="bg-red-600 text-white font-black px-4 py-2 rounded-lg rotate-[-12deg] border-2 border-white text-xl shadow-lg uppercase tracking-wider">
+                        Sold Out
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -144,15 +194,30 @@ function POS() {
           </div>
 
           <div className="p-6 border-t border-stone-200 bg-stone-50 space-y-4">
+            
+            {/* 🎟️ ส่วนใส่โค้ดโปรโมชั่นแบบใหม่ */}
             <div>
-              <p className="text-sm font-bold text-stone-500 mb-2">ส่วนลดโปรโมชั่น</p>
+              <p className="text-sm font-bold text-stone-500 mb-2">โค้ดส่วนลด (Promo Code)</p>
               <div className="flex gap-2">
-                {[0, 10, 20].map(percent => (
-                  <button key={percent} onClick={() => setDiscount(percent)} className={`flex-1 py-2 rounded-lg font-bold text-sm border transition-colors ${discount === percent ? "bg-amber-600 text-white border-amber-600" : "bg-white text-stone-600 hover:bg-stone-100"}`}>
-                    {percent === 0 ? "ไม่มี" : `ลด ${percent}%`}
-                  </button>
-                ))}
+                <input 
+                  type="text" 
+                  value={promoCode} 
+                  onChange={(e) => setPromoCode(e.target.value)} 
+                  placeholder="เช่น COFFEE10" 
+                  className="flex-1 px-4 py-2 rounded-lg border focus:outline-none focus:border-amber-500 font-bold uppercase"
+                />
+                <button 
+                  onClick={applyPromoCode} 
+                  className="px-4 py-2 bg-stone-800 hover:bg-stone-900 text-white font-bold rounded-lg transition-colors"
+                >
+                  ใช้โค้ด
+                </button>
               </div>
+              {promoMessage && (
+                <p className={`text-xs mt-2 font-bold ${discount > 0 ? "text-green-600" : "text-red-500"}`}>
+                  {promoMessage}
+                </p>
+              )}
             </div>
 
             <div className="space-y-1">
@@ -203,7 +268,6 @@ function POS() {
                   <p className="text-blue-800 font-bold mb-4">สแกน QR Code เพื่อชำระเงิน</p>
                   
                   <div className="bg-white p-4 rounded-xl shadow-md border border-blue-200 mb-4">
-                    {/* ✅ ใช้ QRCodeSVG ตรงนี้ */}
                     <QRCodeSVG value={qrPayload} size={200} />
                   </div>
                   
